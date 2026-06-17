@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Golf</title>
+
+<style>
+
+body{
+    margin:0;
+    background:#222;
+    color:white;
+    font-family:Arial,sans-serif;
+    text-align:center;
+}
+
+#menu{
+    padding-top:50px;
+}
+
+button{
+    padding:12px 20px;
+    margin:10px;
+    font-size:18px;
+    cursor:pointer;
+}
+
+#gameContainer{
+    display:none;
+}
+
+canvas{
+    display:block;
+    margin:20px auto;
+    background:#2f9e44;
+    border:4px solid white;
+}
+
+#topBar{
+    margin-top:15px;
+    font-size:24px;
+}
+
+#winScreen{
+    display:none;
+    margin-top:15px;
+}
+
+</style>
+</head>
+<body>
+
+<div id="menu">
+
+    <h1>Mini Golf</h1>
+
+    <h2>Select Level</h2>
+
+    <button onclick="startLevel(0)">Level 1</button>
+    <button onclick="startLevel(1)">Level 2</button>
+
+</div>
+
+<div id="gameContainer">
+
+    <div id="topBar">
+        Strokes:
+        <span id="strokeCount">0</span>
+    </div>
+
+    <button onclick="backToMenu()">Menu</button>
+
+    <canvas id="gameCanvas" width="900" height="500"></canvas>
+
+    <div id="winScreen"></div>
+
+</div>
+
+<script>
+
+// =====================
+// LEVEL DATA
+// =====================
+
+const levels = [
+
+{
+    start:{x:100,y:250},
+    hole:{x:800,y:250},
+
+    walls:[
+        {x:300,y:100,w:40,h:300}
+    ]
+},
+
+{
+    start:{x:100,y:100},
+    hole:{x:800,y:400},
+
+    walls:[
+        {x:250,y:0,w:40,h:350},
+        {x:550,y:150,w:40,h:350}
+    ]
+}
+
+];
+
+// =====================
+
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+let currentLevel = 0;
+let strokes = 0;
+
+let dragging = false;
+let mouseX = 0;
+let mouseY = 0;
+
+let levelComplete = false;
+let sinking = false;
+let sinkProgress = 0;
+
+const ball = {
+
+    x:100,
+    y:100,
+
+    vx:0,
+    vy:0,
+
+    radius:10,
+    drawRadius:10
+};
+
+const MAX_STEP_SIZE = 4;
+
+const hole = {
+
+    x:700,
+    y:250,
+
+    radius:14
+};
+
+let walls = [];
+
+// =====================
+// LEVEL MANAGEMENT
+// =====================
+
+function startLevel(index){
+
+    currentLevel = index;
+
+    strokes = 0;
+    sinking = false;
+    levelComplete = false;
+    sinkProgress = 0;
+
+    document.getElementById("strokeCount").textContent = strokes;
+
+    const level = levels[index];
+
+    ball.x = level.start.x;
+    ball.y = level.start.y;
+
+    ball.vx = 0;
+    ball.vy = 0;
+
+    ball.drawRadius = ball.radius;
+
+    hole.x = level.hole.x;
+    hole.y = level.hole.y;
+
+    walls = level.walls;
+
+    document.getElementById("menu").style.display = "none";
+    document.getElementById("gameContainer").style.display = "block";
+    document.getElementById("winScreen").style.display = "none";
+}
+
+function backToMenu(){
+
+    document.getElementById("menu").style.display = "block";
+    document.getElementById("gameContainer").style.display = "none";
+}
+
+function nextLevel(){
+
+    const next = currentLevel + 1;
+
+    if(next < levels.length){
+        startLevel(next);
+    }
+    else{
+        backToMenu();
+    }
+}
+
+// =====================
+// INPUT
+// =====================
+
+canvas.addEventListener("mousedown", e=>{
+
+    if(levelComplete || sinking) return;
+
+    if(
+        Math.abs(ball.vx) > 0.1 ||
+        Math.abs(ball.vy) > 0.1
+    ) return;
+
+    const rect = canvas.getBoundingClientRect();
+
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const dx = mx - ball.x;
+    const dy = my - ball.y;
+
+    if(Math.hypot(dx,dy) <= ball.radius + 5){
+
+        dragging = true;
+
+        mouseX = mx;
+        mouseY = my;
+    }
+});
+
+window.addEventListener("mousemove", e=>{
+
+    if(!dragging) return;
+
+    const rect = canvas.getBoundingClientRect();
+
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+});
+
+window.addEventListener("mouseup", ()=>{
+
+    if(!dragging) return;
+
+    dragging = false;
+
+    const powerX = ball.x - mouseX;
+    const powerY = ball.y - mouseY;
+
+    ball.vx = powerX * 0.15;
+    ball.vy = powerY * 0.15;
+
+    strokes++;
+
+    document.getElementById("strokeCount").textContent = strokes;
+});
+
+// =====================
+// WALL PHYSICS
+// =====================
+
+function collideWall(wall){
+
+    const nearestX =
+        Math.max(
+            wall.x,
+            Math.min(ball.x, wall.x + wall.w)
+        );
+
+    const nearestY =
+        Math.max(
+            wall.y,
+            Math.min(ball.y, wall.y + wall.h)
+        );
+
+    let dx = ball.x - nearestX;
+    let dy = ball.y - nearestY;
+
+    const distance = Math.hypot(dx,dy);
+
+    if(distance >= ball.radius)
+        return;
+
+    // Corner collision
+
+    let nx, ny;
+
+    if(distance > 0.0001){
+
+        nx = dx / distance;
+        ny = dy / distance;
+
+    }else{
+
+        // Rare case where center enters wall
+
+        if(Math.abs(ball.vx) > Math.abs(ball.vy)){
+
+            nx = Math.sign(ball.vx);
+            ny = 0;
+
+        }else{
+
+            nx = 0;
+            ny = Math.sign(ball.vy);
+        }
+    }
+
+    // Push ball outside wall
+
+    const overlap = ball.radius - distance;
+
+    ball.x += nx * overlap;
+    ball.y += ny * overlap;
+
+    // Reflect velocity
+
+    const dot =
+        ball.vx * nx +
+        ball.vy * ny;
+
+    if(dot < 0){
+
+        ball.vx =
+            ball.vx -
+            2 * dot * nx;
+
+        ball.vy =
+            ball.vy -
+            2 * dot * ny;
+
+        ball.vx *= 0.9;
+        ball.vy *= 0.9;
+    }
+}
+
+// =====================
+// UPDATE
+// =====================
+
+function update(){
+
+    if(levelComplete)
+        return;
+
+    if(sinking){
+
+        sinkProgress += 0.04;
+
+        ball.x += (hole.x - ball.x) * 0.12;
+        ball.y += (hole.y - ball.y) * 0.12;
+
+        ball.drawRadius =
+            ball.radius *
+            (1 - sinkProgress);
+
+        if(ball.drawRadius < 0.5){
+
+            ball.drawRadius = 0;
+
+            sinking = false;
+            levelComplete = true;
+
+            document.getElementById("winScreen").innerHTML = `
+                <h2>Hole Complete!</h2>
+                <p>Strokes: ${strokes}</p>
+                <button onclick="backToMenu()">
+                    Level Select
+                </button>
+                <button onclick="nextLevel()">
+                    Next Level
+                </button>
+            `;
+
+            document.getElementById("winScreen").style.display = "block";
+        }
+
+        return;
+    }
+
+    const speed = Math.hypot(
+    ball.vx,
+    ball.vy
+);
+
+const steps = Math.max(
+    1,
+    Math.ceil(speed / MAX_STEP_SIZE)
+);
+
+for(let i = 0; i < steps; i++){
+
+    ball.x += ball.vx / steps;
+    ball.y += ball.vy / steps;
+
+    for(const wall of walls){
+        collideWall(wall);
+    }
+}
+
+    ball.vx *= 0.985;
+    ball.vy *= 0.985;
+
+    if(Math.abs(ball.vx) < 0.01) ball.vx = 0;
+    if(Math.abs(ball.vy) < 0.01) ball.vy = 0;
+
+    // Arena walls
+
+    if(ball.x - ball.radius < 0){
+
+        ball.x = ball.radius;
+        ball.vx *= -1;
+    }
+
+    if(ball.x + ball.radius > canvas.width){
+
+        ball.x = canvas.width - ball.radius;
+        ball.vx *= -1;
+    }
+
+    if(ball.y - ball.radius < 0){
+
+        ball.y = ball.radius;
+        ball.vy *= -1;
+    }
+
+    if(ball.y + ball.radius > canvas.height){
+
+        ball.y = canvas.height - ball.radius;
+        ball.vy *= -1;
+    }
+
+    // Hole logic
+
+    const dx = hole.x - ball.x;
+    const dy = hole.y - ball.y;
+
+    const dist = Math.hypot(dx,dy);
+
+    // Ball center must cross over cup
+
+    if(
+        dist < hole.radius &&
+        speed < 3.5
+    ){
+
+        sinking = true;
+
+        ball.vx = 0;
+        ball.vy = 0;
+    }
+}
+
+// =====================
+// DRAW
+// =====================
+
+function draw(){
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    // Hole
+
+    ctx.fillStyle = "#000";
+
+    ctx.beginPath();
+    ctx.arc(
+        hole.x,
+        hole.y,
+        hole.radius,
+        0,
+        Math.PI * 2
+    );
+    ctx.fill();
+
+    // Walls
+
+    ctx.fillStyle = "#666";
+
+    for(const wall of walls){
+
+        ctx.fillRect(
+            wall.x,
+            wall.y,
+            wall.w,
+            wall.h
+        );
+    }
+
+    // Aim line
+
+    if(dragging){
+
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            ball.x,
+            ball.y
+        );
+
+        ctx.lineTo(
+            mouseX,
+            mouseY
+        );
+
+        ctx.stroke();
+    }
+
+    // Ball
+
+    ctx.fillStyle = "white";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        ball.x,
+        ball.y,
+        ball.drawRadius,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+}
+
+function gameLoop(){
+
+    update();
+    draw();
+
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+
+</script>
+
+</body>
+</html>
